@@ -69,16 +69,38 @@ st.markdown("""
     }
 
     /* 【スマホ対策】強制的に横並びにする */
-    div[data-testid="stHorizontalBlock"] {
-        flex-wrap: nowrap !important;
-        gap: 2px !important; /* gapも極小に */
-        align-items: center !important; /* 垂直方向中央揃え */
-    }
-    
-    div[data-testid="column"] {
-        min-width: 0 !important;
-        /* flex属性はStreamlitが計算した比率(inline style)を優先させるため、这里では上書きしない！ */
-        padding: 0 2px !important; /* カラム間のパディングも減らす */
+    /* 640px以下(Streamlitのスマホブレークポイント)で、カラム構成を強制上書きする */
+    @media (max-width: 640px) {
+        div[data-testid="stHorizontalBlock"] {
+            flex-wrap: nowrap !important;
+            gap: 2px !important;
+            align-items: center !important;
+        }
+        
+        /* ボタンなどのカラム：固定幅にする */
+        /* カラム2(数量), 3(減), 4(増), 5(削除) */
+        div[data-testid="column"]:nth-of-type(2) { flex: 0 0 30px !important; min-width: 30px !important; }
+        div[data-testid="column"]:nth-of-type(3) { flex: 0 0 36px !important; min-width: 36px !important; }
+        div[data-testid="column"]:nth-of-type(4) { flex: 0 0 36px !important; min-width: 36px !important; }
+        div[data-testid="column"]:nth-of-type(5) { flex: 0 0 36px !important; min-width: 36px !important; }
+        
+        /* カラム1(商品名)：残りの幅をすべて使う */
+        div[data-testid="column"]:nth-of-type(1) {
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            padding-right: 4px !important;
+        }
+        
+        /* Streamlitのデフォルトパディングを消す */
+        div[data-testid="column"] {
+            padding: 0 1px !important;
+        }
+        
+        /* ボタン自体のスタイル調整 */
+        .stButton button {
+            min-width: 0px !important;
+            padding: 0px !important;
+        }
     }
     
     /* 長すぎる商品名は「...」で省略して、レイアウト崩れを防ぐ */
