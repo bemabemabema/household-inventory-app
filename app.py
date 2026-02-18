@@ -36,11 +36,59 @@ def init_connection():
         try:
             url = st.secrets["SUPABASE_URL"]
             key = st.secrets["SUPABASE_KEY"]
-        except FileNotFoundError:
+        except (FileNotFoundError, KeyError):
             st.error("Supabaseの接続情報が見つかりません。.envファイルまたはSecretsを設定してください。")
             st.stop()
             
     return create_client(url, key)
+
+# --- パスワード認証機能 ---
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    
+    # パスワードが設定されていない（ローカルなどで.envにもない）場合はスルーするか、
+    # 本番環境では必須にするか。ここでは st.secrets から取得を試みる
+    try:
+        password = st.secrets["APP_PASSWORD"]
+    except (FileNotFoundError, KeyError):
+        # ローカル開発などでパスワード設定がない場合は、os.environを見るか、
+        # あるいは「設定なし」として通す手もあるが、今回は安全側に倒してエラー表示
+        # ただしローカル開発を考慮し、環境変数もチェック
+        password = os.environ.get("APP_PASSWORD")
+        if not password:
+            # パスワード設定がなければ（初回など）、一旦認証なしで通すか警告を出す
+            # 今回は「設定必須」として実装
+            st.warning("パスワード(APP_PASSWORD)が設定されていません。Secretsを設定してください。")
+            st.stop()
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == password:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # don't store password
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # First run, show input for password.
+        st.text_input(
+            "合言葉（パスワード）を入力してください 🔒", type="password", on_change=password_entered, key="password"
+        )
+        return False
+    elif not st.session_state["password_correct"]:
+        # Password was incorrect, show input + error.
+        st.text_input(
+            "合言葉（パスワード）を入力してください 🔒", type="password", on_change=password_entered, key="password"
+        )
+        st.error("パスワードが違います 😕")
+        return False
+    else:
+        # Password was correct.
+        return True
+
+# まずパスワードチェック（通らなければここで止まる）
+if not check_password():
+    st.stop()
 
 supabase = init_connection()
 
