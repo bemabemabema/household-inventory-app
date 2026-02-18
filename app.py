@@ -67,6 +67,18 @@ st.markdown("""
     hr {
         margin: 0.5rem 0 !important;
     }
+
+    /* 【スマホ対策】強制的に横並びにする */
+    /* Streamlitは幅が狭いと自動で縦並び(stack)にするので、それを無効化 */
+    div[data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+        gap: 0.2rem !important;
+    }
+    
+    div[data-testid="column"] {
+        min-width: 0px !important;
+        flex: 1 1 auto !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
