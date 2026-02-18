@@ -6,48 +6,21 @@ from dotenv import load_dotenv
 import pandas as pd
 import datetime
 
-# ページ設定
-st.set_page_config(page_title="お家の在庫管理", page_icon="🏠", layout="centered", initial_sidebar_state="collapsed")
+# ページ設定（スマホでも見やすく）
+st.set_page_config(page_title="お家の在庫管理", page_icon="🏠", layout="centered")
 
-# CSSで見た目を調整
+# CSSで見た目を調整（最初のデザインに戻す）
 st.markdown("""
 <style>
-    /* 全体の余白調整 */
-    .block-container {
-        padding-top: 2rem !important;
-        padding-bottom: 2rem !important;
-    }
-    
-    /* 要素間の垂直余白を削る */
-    .stMarkdown, .stText, .stCaption {
-        margin-bottom: -0.6rem !important;
-    }
-    
-    /* カラム間の余白 */
-    div[data-testid="stHorizontalBlock"] {
-        gap: 0.5rem !important;
-    }
-    
-    /* 数量表示のスタイル */
-    .qty-display {
-        background-color: #f0f2f6;
-        border-radius: 5px;
-        text-align: center;
+    .big-font {
+        font-size: 20px !important;
         font-weight: bold;
-        font-size: 1.2rem;
-        line-height: 2.2rem;
-        height: 2.2rem;
     }
-    
-    /* ボタンの高さ調整 */
     .stButton button {
-        height: 2.2rem !important;
-        padding: 0 !important;
         width: 100%;
     }
-    
-    /* エクスパンダー（カテゴリ）の文字 */
-    div[data-testid="stExpander"] p {
+    div[data-testid="stExpander"] div[role="button"] p {
+        font-size: 1.1rem;
         font-weight: bold;
     }
 </style>
@@ -75,8 +48,11 @@ supabase = init_connection()
 # --- 認証機能 (Cookie対応) ---
 def check_password():
     cookie_manager = stx.CookieManager()
+    
+    # Cookie取得
     auth_token = cookie_manager.get("auth_token")
 
+    # パスワード（正解）を取得
     try:
         correct_password = st.secrets["APP_PASSWORD"]
     except (FileNotFoundError, KeyError):
@@ -96,6 +72,7 @@ def check_password():
     def password_entered():
         if st.session_state["password_input"] == correct_password:
             st.session_state.auth_success = True
+            # Cookieに保存 (有効期限30日)
             expires = datetime.datetime.now() + datetime.timedelta(days=30)
             cookie_manager.set("auth_token", SESSION_TOKEN, expires_at=expires)
         else:
@@ -103,16 +80,23 @@ def check_password():
             st.error("パスワードが違います")
 
     if not st.session_state.auth_success:
-        st.text_input("合言葉を入力してください 🔒", type="password", key="password_input", on_change=password_entered)
+        st.text_input(
+            "合言葉を入力してください 🔒", 
+            type="password", 
+            key="password_input",
+            on_change=password_entered
+        )
         return False
     else:
         return True
 
+# まずパスワードチェック
 if not check_password():
     st.stop()
 
-# --- アプリ本体 ---
+# --- 以降、認証済みの処理 ---
 
+# ログアウトボタン（サイドバー）
 with st.sidebar:
     st.write("---")
     if st.button("ログアウト"):
@@ -121,20 +105,23 @@ with st.sidebar:
         st.session_state.auth_success = False
         st.rerun()
 
+# データ取得
 def load_data():
     response = supabase.table("household_inventory").select("*").order("created_at", desc=True).execute()
     return response.data
 
+# 数量更新
 def update_quantity(item_id, current_quantity, change):
     new_quantity = max(0, current_quantity + change)
     supabase.table("household_inventory").update({"quantity": new_quantity}).eq("id", item_id).execute()
     st.rerun()
 
+# 削除
 def delete_item(item_id):
     supabase.table("household_inventory").delete().eq("id", item_id).execute()
     st.rerun()
 
-# サイドバー：新規登録
+# --- サイドバー：新規登録 ---
 with st.sidebar:
     st.header("📝 新しく追加")
     with st.form("add_form", clear_on_submit=True):
@@ -145,19 +132,26 @@ with st.sidebar:
         
         category = st.selectbox("カテゴリ", category_options)
         new_category = st.text_input("新しいカテゴリ（任意）")
+        
         name = st.text_input("商品名")
         quantity = st.number_input("初期数量", min_value=1, value=1)
-        notes = st.text_area("備考（任意）", height=100)
+        notes = st.text_area("備考（任意）")
         
         submitted = st.form_submit_button("追加する")
         
         if submitted and name:
             final_category = new_category if new_category else category
-            data = {"category": final_category, "name": name, "quantity": quantity, "notes": notes}
+            data = {
+                "category": final_category,
+                "name": name,
+                "quantity": quantity,
+                "notes": notes
+            }
             supabase.table("household_inventory").insert(data).execute()
+            st.success(f"{name} を追加しました！")
             st.rerun()
 
-# メイン画面
+# --- メイン画面：在庫一覧 ---
 st.title("🏠 お家の在庫管理")
 
 items = load_data()
@@ -173,29 +167,27 @@ else:
             cat_items = df[df["category"] == cat]
             
             for index, row in cat_items.iterrows():
-                # --- スマホ向け 3行コンパクトレイアウト ---
+                # 最初の安定した5カラム構成
+                c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 0.5])
                 
-                # 1行目: 商品名
-                st.markdown(f"**{row['name']}**")
+                with c1:
+                    st.markdown(f"<div class='big-font'>{row['name']}</div>", unsafe_allow_html=True)
+                    if row['notes']:
+                        st.caption(f"📝 {row['notes']}")
                 
-                # 2行目: 備考（あれば）
-                if row['notes']:
-                    st.caption(f"📝 {row['notes']}")
+                with c2:
+                    st.markdown(f"<div style='text-align: center; font-size: 24px; font-weight: bold;'>{row['quantity']}</div>", unsafe_allow_html=True)
                 
-                # 3行目: 操作ボタン
-                col_qty, col_minus, col_plus, col_del = st.columns([1.2, 1, 1, 0.8])
-                
-                with col_qty:
-                    st.markdown(f"<div class='qty-display'>{row['quantity']}</div>", unsafe_allow_html=True)
-                with col_minus:
+                with c3:
                     if st.button("➖", key=f"minus_{row['id']}"):
                         update_quantity(row['id'], row['quantity'], -1)
-                with col_plus:
+                
+                with c4:
                     if st.button("➕", key=f"plus_{row['id']}"):
                         update_quantity(row['id'], row['quantity'], 1)
-                with col_del:
+                
+                with c5:
                     if st.button("🗑️", key=f"del_{row['id']}"):
                         delete_item(row['id'])
                 
-                # 区切り線
-                st.markdown("<hr style='margin: 0.8rem 0; border: 0; border-top: 1px solid #eee;'/>", unsafe_allow_html=True)
+                st.divider()
