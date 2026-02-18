@@ -1,25 +1,71 @@
 import streamlit as st
+import extra_streamlit_components as stx
 from supabase import create_client, Client
 import os
 from dotenv import load_dotenv
 import pandas as pd
+import datetime
 
 # ページ設定（スマホでも見やすく）
-st.set_page_config(page_title="お家の在庫管理", page_icon="🏠", layout="centered")
+st.set_page_config(page_title="お家の在庫管理", page_icon="🏠", layout="centered", initial_sidebar_state="collapsed")
 
-# CSSで見た目を調整
+# CSSで見た目を調整（コンパクト化）
 st.markdown("""
 <style>
-    .big-font {
-        font-size: 20px !important;
-        font-weight: bold;
+    /* 全体の余白調整 */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
     }
+    
+    /* ボタンのスタイル */
     .stButton button {
         width: 100%;
+        padding: 0px !important;
+        height: 2.5rem !important;
+        line-height: normal !important;
     }
-    div[data-testid="stExpander"] div[role="button"] p {
-        font-size: 1.1rem;
+    
+    /* アイテム行のスタイル */
+    .item-row {
+        border-bottom: 1px solid #f0f0f0;
+        padding: 0.5rem 0;
+        display: flex;
+        align-items: center;
+    }
+    
+    /* 商品名 */
+    .item-name {
         font-weight: bold;
+        font-size: 1rem;
+        margin-bottom: 0px !important;
+    }
+    
+    /* 備考 */
+    .item-note {
+        font-size: 0.8rem;
+        color: #666;
+        margin-top: -3px !important;
+        margin-bottom: 0px !important;
+        line-height: 1.2;
+    }
+    
+    /* 数量 */
+    .item-qty {
+        text-align: center;
+        font-size: 1.3rem;
+        font-weight: bold;
+        line-height: 2.5rem;
+    }
+    
+    /* アコーディオンの文字サイズ */
+    div[data-testid="stExpander"] p {
+        font-weight: bold;
+    }
+    
+    /* Divider削除、代わりにborder-bottomを使うので調整 */
+    hr {
+        margin: 0.5rem 0 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -31,66 +77,84 @@ def init_connection():
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_KEY")
     
-    # Streamlit Cloudでのデプロイ時は st.secrets を使う
     if not url:
         try:
             url = st.secrets["SUPABASE_URL"]
             key = st.secrets["SUPABASE_KEY"]
         except (FileNotFoundError, KeyError):
-            st.error("Supabaseの接続情報が見つかりません。.envファイルまたはSecretsを設定してください。")
+            st.error("Supabaseの接続情報が見つかりません。")
             st.stop()
             
     return create_client(url, key)
 
-# --- パスワード認証機能 ---
+supabase = init_connection()
+
+# --- 認証機能 (Cookie対応) ---
 def check_password():
-    """Returns `True` if the user had the correct password."""
+    # Cookieマネージャーの初期化
+    cookie_manager = stx.CookieManager()
     
-    # パスワードが設定されていない（ローカルなどで.envにもない）場合はスルーするか、
-    # 本番環境では必須にするか。ここでは st.secrets から取得を試みる
+    # 認証済みCookieがあるか確認
+    # (値の取得に少し時間がかかる場合があるため、st.rerunが必要になることも)
+    params = st.query_params
+    auth_token = cookie_manager.get("auth_token")
+
+    # パスワード（正解）を取得
     try:
-        password = st.secrets["APP_PASSWORD"]
+        correct_password = st.secrets["APP_PASSWORD"]
     except (FileNotFoundError, KeyError):
-        # ローカル開発などでパスワード設定がない場合は、os.environを見るか、
-        # あるいは「設定なし」として通す手もあるが、今回は安全側に倒してエラー表示
-        # ただしローカル開発を考慮し、環境変数もチェック
-        password = os.environ.get("APP_PASSWORD")
-        if not password:
-            # パスワード設定がなければ（初回など）、一旦認証なしで通すか警告を出す
-            # 今回は「設定必須」として実装
-            st.warning("パスワード(APP_PASSWORD)が設定されていません。Secretsを設定してください。")
+        correct_password = os.environ.get("APP_PASSWORD")
+        if not correct_password:
+            st.warning("パスワード(APP_PASSWORD)が設定されていません。")
             st.stop()
+    
+    # 簡単なトークン生成（本番ではもっと堅牢にすべきだが、簡易版としてパスワードそのものを使用）
+    # ※セキュリティ向上のため、本来はハッシュ化すべきです
+    SESSION_TOKEN = f"auth_{correct_password}"
 
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        if st.session_state["password"] == password:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # don't store password
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        # First run, show input for password.
-        st.text_input(
-            "合言葉（パスワード）を入力してください 🔒", type="password", on_change=password_entered, key="password"
-        )
-        return False
-    elif not st.session_state["password_correct"]:
-        # Password was incorrect, show input + error.
-        st.text_input(
-            "合言葉（パスワード）を入力してください 🔒", type="password", on_change=password_entered, key="password"
-        )
-        st.error("パスワードが違います 😕")
-        return False
-    else:
-        # Password was correct.
+    if auth_token == SESSION_TOKEN:
         return True
 
-# まずパスワードチェック（通らなければここで止まる）
+    # 認証されていない場合、パスワード入力フォームを表示
+    if "auth_success" not in st.session_state:
+        st.session_state.auth_success = False
+
+    def password_entered():
+        if st.session_state["password_input"] == correct_password:
+            st.session_state.auth_success = True
+            # Cookieに保存 (有効期限30日)
+            expires = datetime.datetime.now() + datetime.timedelta(days=30)
+            cookie_manager.set("auth_token", SESSION_TOKEN, expires_at=expires)
+        else:
+            st.session_state.auth_success = False
+            st.error("パスワードが違います")
+
+    if not st.session_state.auth_success:
+        st.text_input(
+            "合言葉を入力してください 🔒", 
+            type="password", 
+            key="password_input",
+            on_change=password_entered
+        )
+        return False
+    else:
+        # 入力成功直後
+        return True
+
+# まずパスワードチェック
 if not check_password():
     st.stop()
 
-supabase = init_connection()
+# --- 以降、認証済みの処理 ---
+
+# ログアウトボタン（サイドバー）
+with st.sidebar:
+    st.write("---")
+    if st.button("ログアウト"):
+        cookie_manager = stx.CookieManager()
+        cookie_manager.delete("auth_token")
+        st.session_state.auth_success = False
+        st.rerun()
 
 # データ取得
 def load_data():
@@ -101,8 +165,6 @@ def load_data():
 def update_quantity(item_id, current_quantity, change):
     new_quantity = max(0, current_quantity + change)
     supabase.table("household_inventory").update({"quantity": new_quantity}).eq("id", item_id).execute()
-    # キャッシュをクリアして再読み込みさせるため、rerunは呼び出し元で行うか、st.experimental_rerun()を使う
-    # 最新のStreamlitでは st.rerun()
     st.rerun()
 
 # 削除
@@ -114,20 +176,17 @@ def delete_item(item_id):
 with st.sidebar:
     st.header("📝 新しく追加")
     with st.form("add_form", clear_on_submit=True):
-        # 既存のカテゴリを取得して選択肢にする
         existing_data = load_data()
         existing_categories = sorted(list(set([item["category"] for item in existing_data])))
         default_categories = ["食料品", "日用品", "消耗品", "その他"]
-        # マージして重複削除
         category_options = sorted(list(set(default_categories + existing_categories)))
         
         category = st.selectbox("カテゴリ", category_options)
-        # 手入力も可能にするためのテキスト入力（今回はシンプルにSelectboxのみだが、要望あれば追加）
-        new_category = st.text_input("新しいカテゴリを作る（既存なら空欄）")
+        new_category = st.text_input("新しいカテゴリ（任意）")
         
-        name = st.text_input("商品名（例：醤油）")
+        name = st.text_input("商品名")
         quantity = st.number_input("初期数量", min_value=1, value=1)
-        notes = st.text_area("備考（任意）")
+        notes = st.text_area("備考（任意）", height=100)
         
         submitted = st.form_submit_button("追加する")
         
@@ -140,19 +199,16 @@ with st.sidebar:
                 "notes": notes
             }
             supabase.table("household_inventory").insert(data).execute()
-            st.success(f"{name} を追加しました！")
             st.rerun()
 
 # --- メイン画面：在庫一覧 ---
 st.title("🏠 お家の在庫管理")
 
-# データ読み込み
 items = load_data()
 
 if not items:
     st.info("👈 左のサイドバーからアイテムを追加してください")
 else:
-    # カテゴリごとにグループ化
     df = pd.DataFrame(items)
     categories = df["category"].unique()
     
@@ -161,16 +217,18 @@ else:
             cat_items = df[df["category"] == cat]
             
             for index, row in cat_items.iterrows():
-                # 1行にレイアウト：名前(と備考), 数量, マイナス, プラス, 削除
-                c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 0.5])
+                # コンパクトレイアウト: 名前エリア(3), 数量(1), マイナス(0.8), プラス(0.8), 削除(0.6)
+                c1, c2, c3, c4, c5 = st.columns([3, 1, 0.8, 0.8, 0.6], gap="small")
                 
                 with c1:
-                    st.markdown(f"<div class='big-font'>{row['name']}</div>", unsafe_allow_html=True)
+                    # 商品名を表示
+                    st.markdown(f"<div class='item-name'>{row['name']}</div>", unsafe_allow_html=True)
+                    # 備考があれば小さく表示
                     if row['notes']:
-                        st.caption(f"📝 {row['notes']}")
+                        st.markdown(f"<div class='item-note'>📝{row['notes']}</div>", unsafe_allow_html=True)
                 
                 with c2:
-                    st.markdown(f"<div style='text-align: center; font-size: 24px; font-weight: bold;'>{row['quantity']}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='item-qty'>{row['quantity']}</div>", unsafe_allow_html=True)
                 
                 with c3:
                     if st.button("➖", key=f"minus_{row['id']}"):
@@ -184,5 +242,7 @@ else:
                     if st.button("🗑️", key=f"del_{row['id']}"):
                         delete_item(row['id'])
                 
-                st.divider()
-
+                # 薄い区切り線（CSSでborder-bottomを使わず、st.dividerより細い線を引くにはmarkdownのhrが手っ取り早いが、余白大きくなりがち）
+                # ここではCSSでitem-rowクラスを作ってborder引くのが綺麗だが、Streamlitの構造上divで囲むのが難しい
+                # 代わりに薄いDividerを入れる
+                st.markdown("<hr style='margin: 0.2rem 0; border: 0; border-top: 1px solid #eee;'/>", unsafe_allow_html=True)
