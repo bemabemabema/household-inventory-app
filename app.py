@@ -69,15 +69,26 @@ st.markdown("""
     }
 
     /* 【スマホ対策】強制的に横並びにする */
-    /* Streamlitは幅が狭いと自動で縦並び(stack)にするので、それを無効化 */
     div[data-testid="stHorizontalBlock"] {
         flex-wrap: nowrap !important;
-        gap: 0.2rem !important;
+        gap: 2px !important; /* gapも極小に */
+        align-items: center !important; /* 垂直方向中央揃え */
     }
     
     div[data-testid="column"] {
-        min-width: 0px !important;
-        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        /* flex属性はStreamlitが計算した比率(inline style)を優先させるため、这里では上書きしない！ */
+        padding: 0 2px !important; /* カラム間のパディングも減らす */
+    }
+    
+    /* 長すぎる商品名は「...」で省略して、レイアウト崩れを防ぐ */
+    .item-name {
+        font-weight: bold;
+        font-size: 0.95rem;
+        margin-bottom: 0px !important;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 </style>
 """, unsafe_allow_html=True)
